@@ -1,9 +1,9 @@
-# MobyPay API
+# Mobys API
 
 ## Overview
-MobyPay is a developer-first payments API that enables businesses and developers in Francophone West Africa to accept mobile money payments from customers via providers like **Orange Money** and **Wave**.
+Mobys is a developer-first payments API that enables businesses and developers in Francophone West Africa to accept mobile money payments from customers via providers like **Orange Money** and **Wave**.
 
-The goal is to create a clean, unified API for initiating and confirming mobile payments across major providers, starting with Mali, Côte d’Ivoire, and Senegal. Future versions may expand to other African countries and include additional providers like Moov and MTN.
+The goal is to create a clean, unified API for initiating and confirming mobile payments across major providers, starting with Mali, Côte d'Ivoire, and Senegal. Future versions may expand to other African countries and include additional providers like Moov and MTN.
 
 ---
 
