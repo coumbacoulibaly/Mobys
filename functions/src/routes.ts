@@ -22,6 +22,22 @@ import { FieldValue } from 'firebase-admin/firestore';
 import ProviderFactory from './providers';
 import { validateWestAfricanPhone, isProviderSupportedInCountry, getAllSupportedCountries } from './utils/phone-validation';
 import { createLedgerEntry, updateTransactionStatus, getUserBalance, getUserLedgerEntries, getLedgerEntriesByTransaction, getBalanceHistory, reconcileLedger } from './utils/ledger';
+import { 
+  getTransactionAnalytics, 
+  getLedgerAnalytics, 
+  getUserAnalytics, 
+  getAnalyticsSummary 
+} from './utils/analytics';
+import { 
+  createManualLedgerAdjustment,
+  searchTransactions,
+  getTransactionDetails,
+  exportTransactions,
+  getAdminAdjustmentHistory,
+  getSystemHealth,
+  bulkUpdateTransactionStatus,
+  getUserSummary
+} from './utils/admin';
 
 // Initialize Firebase Admin SDK
 try {
@@ -781,6 +797,438 @@ app.post('/ledger/reconcile',
       res.status(500).json({ 
         error: 'Failed to reconcile ledger.',
         code: 'LEDGER_RECONCILIATION_ERROR'
+      });
+    }
+  }
+);
+
+// GET /analytics/transactions endpoint
+app.get('/analytics/transactions', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      const startDate = req.query.start_date ? new Date(req.query.start_date as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+      const endDate = req.query.end_date ? new Date(req.query.end_date as string) : new Date();
+      
+      // Validate date range
+      if (startDate > endDate) {
+        return res.status(400).json({ 
+          error: 'Start date must be before end date.',
+          code: 'INVALID_DATE_RANGE'
+        });
+      }
+
+      // Limit date range to 1 year for performance
+      const maxDays = 365;
+      const daysDiff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysDiff > maxDays) {
+        return res.status(400).json({ 
+          error: `Date range cannot exceed ${maxDays} days.`,
+          code: 'DATE_RANGE_TOO_LARGE'
+        });
+      }
+
+      const analytics = await getTransactionAnalytics(startDate, endDate, userId);
+      
+      res.json({
+        period: {
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
+          days: Math.ceil(daysDiff)
+        },
+        analytics
+      });
+    } catch (error: any) {
+      console.error('Transaction analytics error:', error);
+      res.status(500).json({ 
+        error: 'Failed to retrieve transaction analytics.',
+        code: 'ANALYTICS_ERROR'
+      });
+    }
+  }
+);
+
+// GET /analytics/ledger endpoint
+app.get('/analytics/ledger', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      const startDate = req.query.start_date ? new Date(req.query.start_date as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+      const endDate = req.query.end_date ? new Date(req.query.end_date as string) : new Date();
+      
+      // Validate date range
+      if (startDate > endDate) {
+        return res.status(400).json({ 
+          error: 'Start date must be before end date.',
+          code: 'INVALID_DATE_RANGE'
+        });
+      }
+
+      // Limit date range to 1 year for performance
+      const maxDays = 365;
+      const daysDiff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysDiff > maxDays) {
+        return res.status(400).json({ 
+          error: `Date range cannot exceed ${maxDays} days.`,
+          code: 'DATE_RANGE_TOO_LARGE'
+        });
+      }
+
+      const analytics = await getLedgerAnalytics(startDate, endDate, userId);
+      
+      res.json({
+        period: {
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
+          days: Math.ceil(daysDiff)
+        },
+        analytics
+      });
+    } catch (error: any) {
+      console.error('Ledger analytics error:', error);
+      res.status(500).json({ 
+        error: 'Failed to retrieve ledger analytics.',
+        code: 'ANALYTICS_ERROR'
+      });
+    }
+  }
+);
+
+// GET /analytics/summary endpoint for dashboard
+app.get('/analytics/summary', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const summary = await getAnalyticsSummary();
+      res.json(summary);
+    } catch (error: any) {
+      console.error('Analytics summary error:', error);
+      res.status(500).json({ 
+        error: 'Failed to retrieve analytics summary.',
+        code: 'ANALYTICS_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/analytics/users endpoint (admin only)
+app.get('/admin/analytics/users', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      const limit = parseInt(req.query.limit as string) || 10;
+      
+      // TODO: Add admin role check here
+      // For now, allow any authenticated user to access
+      
+      const userAnalytics = await getUserAnalytics(limit);
+      
+      res.json({
+        users: userAnalytics,
+        total: userAnalytics.length,
+        limit
+      });
+    } catch (error: any) {
+      console.error('User analytics error:', error);
+      res.status(500).json({ 
+        error: 'Failed to retrieve user analytics.',
+        code: 'ANALYTICS_ERROR'
+      });
+    }
+  }
+);
+
+// POST /admin/ledger/adjustment endpoint for manual ledger adjustments
+app.post('/admin/ledger/adjustment', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const adminId = (req as any).user?.id;
+      const { user_id, amount, description, reason, metadata } = req.body;
+
+      // Validate required fields
+      if (!user_id) {
+        return res.status(400).json({ 
+          error: 'User ID is required.',
+          code: 'MISSING_USER_ID'
+        });
+      }
+
+      if (typeof amount !== 'number' || amount === 0) {
+        return res.status(400).json({ 
+          error: 'Amount must be a non-zero number.',
+          code: 'INVALID_AMOUNT'
+        });
+      }
+
+      if (!description || description.trim().length === 0) {
+        return res.status(400).json({ 
+          error: 'Description is required.',
+          code: 'MISSING_DESCRIPTION'
+        });
+      }
+
+      if (!reason || reason.trim().length === 0) {
+        return res.status(400).json({ 
+          error: 'Reason is required.',
+          code: 'MISSING_REASON'
+        });
+      }
+
+      // TODO: Add admin role validation here
+      // For now, allow any authenticated user to create adjustments
+
+      const adjustment = await createManualLedgerAdjustment(
+        user_id,
+        amount,
+        description,
+        reason,
+        adminId,
+        metadata
+      );
+
+      res.json({
+        message: 'Ledger adjustment created successfully',
+        adjustment
+      });
+    } catch (error: any) {
+      console.error('Admin ledger adjustment error:', error);
+      res.status(500).json({ 
+        error: 'Failed to create ledger adjustment.',
+        code: 'ADJUSTMENT_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/transactions/search endpoint for transaction search
+app.get('/admin/transactions/search', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const filters: any = {};
+      const limit = parseInt(req.query.limit as string) || 50;
+      const startAfter = req.query.start_after as string;
+
+      // Parse filters from query parameters
+      if (req.query.user_id) filters.user_id = req.query.user_id;
+      if (req.query.status) filters.status = req.query.status;
+      if (req.query.provider) filters.provider = req.query.provider;
+      if (req.query.country) filters.country = req.query.country;
+      if (req.query.phone) filters.phone = req.query.phone;
+      if (req.query.min_amount) filters.min_amount = parseFloat(req.query.min_amount as string);
+      if (req.query.max_amount) filters.max_amount = parseFloat(req.query.max_amount as string);
+      if (req.query.start_date) filters.start_date = new Date(req.query.start_date as string);
+      if (req.query.end_date) filters.end_date = new Date(req.query.end_date as string);
+
+      const searchResult = await searchTransactions(filters, limit, startAfter);
+
+      res.json(searchResult);
+    } catch (error: any) {
+      console.error('Transaction search error:', error);
+      res.status(500).json({ 
+        error: 'Failed to search transactions.',
+        code: 'SEARCH_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/transaction/:id/details endpoint for detailed transaction view
+app.get('/admin/transaction/:id/details', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const transactionId = req.params.id;
+      
+      const details = await getTransactionDetails(transactionId);
+      
+      res.json(details);
+    } catch (error: any) {
+      console.error('Transaction details error:', error);
+      if (error.message === 'Transaction not found') {
+        res.status(404).json({ 
+          error: 'Transaction not found.',
+          code: 'TRANSACTION_NOT_FOUND'
+        });
+      } else {
+        res.status(500).json({ 
+          error: 'Failed to get transaction details.',
+          code: 'DETAILS_ERROR'
+        });
+      }
+    }
+  }
+);
+
+// GET /admin/transactions/export endpoint for data export
+app.get('/admin/transactions/export', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const filters: any = {};
+      const format = (req.query.format as string) || 'json';
+      const includeMetadata = req.query.include_metadata === 'true';
+      const includeLedgerEntries = req.query.include_ledger_entries === 'true';
+
+      // Parse filters
+      if (req.query.user_id) filters.user_id = req.query.user_id;
+      if (req.query.status) filters.status = req.query.status;
+      if (req.query.provider) filters.provider = req.query.provider;
+      if (req.query.country) filters.country = req.query.country;
+      if (req.query.start_date) filters.start_date = new Date(req.query.start_date as string);
+      if (req.query.end_date) filters.end_date = new Date(req.query.end_date as string);
+
+      const exportOptions = {
+        format: format as 'json' | 'csv',
+        include_metadata: includeMetadata,
+        include_ledger_entries: includeLedgerEntries
+      };
+
+      const exportData = await exportTransactions(filters, exportOptions);
+
+      // Set appropriate headers for download
+      const filename = `transactions_export_${new Date().toISOString().split('T')[0]}.${format}`;
+      
+      res.setHeader('Content-Type', format === 'csv' ? 'text/csv' : 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      res.send(exportData);
+    } catch (error: any) {
+      console.error('Transaction export error:', error);
+      res.status(500).json({ 
+        error: 'Failed to export transactions.',
+        code: 'EXPORT_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/adjustments/history endpoint for admin adjustment history
+app.get('/admin/adjustments/history', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const adminId = req.query.admin_id as string;
+      const userId = req.query.user_id as string;
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      const adjustments = await getAdminAdjustmentHistory(adminId, userId, limit);
+
+      res.json({
+        adjustments,
+        total: adjustments.length,
+        limit
+      });
+    } catch (error: any) {
+      console.error('Admin adjustment history error:', error);
+      res.status(500).json({ 
+        error: 'Failed to get adjustment history.',
+        code: 'HISTORY_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/system/health endpoint for system health monitoring
+app.get('/admin/system/health', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const health = await getSystemHealth();
+      
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        metrics: health
+      });
+    } catch (error: any) {
+      console.error('System health check error:', error);
+      res.status(500).json({ 
+        error: 'Failed to get system health.',
+        code: 'HEALTH_CHECK_ERROR'
+      });
+    }
+  }
+);
+
+// POST /admin/transactions/bulk-update endpoint for bulk status updates
+app.post('/admin/transactions/bulk-update', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const adminId = (req as any).user?.id;
+      const { transaction_ids, new_status, reason } = req.body;
+
+      // Validate required fields
+      if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
+        return res.status(400).json({ 
+          error: 'Transaction IDs array is required and cannot be empty.',
+          code: 'MISSING_TRANSACTION_IDS'
+        });
+      }
+
+      if (!new_status) {
+        return res.status(400).json({ 
+          error: 'New status is required.',
+          code: 'MISSING_STATUS'
+        });
+      }
+
+      if (!reason) {
+        return res.status(400).json({ 
+          error: 'Reason is required.',
+          code: 'MISSING_REASON'
+        });
+      }
+
+      // Limit bulk operations to prevent abuse
+      if (transaction_ids.length > 100) {
+        return res.status(400).json({ 
+          error: 'Cannot update more than 100 transactions at once.',
+          code: 'BULK_LIMIT_EXCEEDED'
+        });
+      }
+
+      const results = await bulkUpdateTransactionStatus(
+        transaction_ids,
+        new_status,
+        adminId,
+        reason
+      );
+
+      res.json({
+        message: 'Bulk update completed',
+        results
+      });
+    } catch (error: any) {
+      console.error('Bulk update error:', error);
+      res.status(500).json({ 
+        error: 'Failed to perform bulk update.',
+        code: 'BULK_UPDATE_ERROR'
+      });
+    }
+  }
+);
+
+// GET /admin/user/:id/summary endpoint for user summary
+app.get('/admin/user/:id/summary', 
+  apiKeyAuth, 
+  async (req, res) => {
+    try {
+      const userId = req.params.id;
+      
+      const summary = await getUserSummary(userId);
+      
+      res.json(summary);
+    } catch (error: any) {
+      console.error('User summary error:', error);
+      res.status(500).json({ 
+        error: 'Failed to get user summary.',
+        code: 'USER_SUMMARY_ERROR'
       });
     }
   }
