@@ -2,6 +2,7 @@
 // Wave API Integration
 
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import * as crypto from 'crypto';
 import { WAVE_CONFIG, API_CONFIG } from '../config';
 
 interface WavePaymentRequest {
@@ -161,22 +162,54 @@ export class WaveProvider {
   }
 
   /**
-   * Verify webhook signature
+   * Verify webhook signature using HMAC
    */
   verifyWebhookSignature(payload: string, signature: string): boolean {
-    // TODO: Implement webhook signature verification
-    // For now, return true in sandbox mode
-    if (WAVE_CONFIG.environment === 'sandbox') {
-      return true;
+    try {
+      // In sandbox mode, accept all webhooks for testing
+      if (WAVE_CONFIG.environment === 'sandbox') {
+        console.log('Wave: Sandbox mode - accepting webhook without signature verification');
+        return true;
+      }
+
+      // In production, verify the signature
+      if (!WAVE_CONFIG.webhookSecret) {
+        console.error('Wave: Webhook secret not configured');
+        return false;
+      }
+
+      if (!signature) {
+        console.error('Wave: No signature provided in webhook');
+        return false;
+      }
+
+      // Create HMAC signature
+      const expectedSignature = crypto
+        .createHmac('sha256', WAVE_CONFIG.webhookSecret)
+        .update(payload)
+        .digest('hex');
+
+      // Compare signatures (constant-time comparison to prevent timing attacks)
+      const isValid = crypto.timingSafeEqual(
+        Buffer.from(signature, 'hex'),
+        Buffer.from(expectedSignature, 'hex')
+      );
+
+      console.log('Wave webhook signature verification:', {
+        provided: signature,
+        expected: expectedSignature,
+        isValid
+      });
+
+      return isValid;
+    } catch (error) {
+      console.error('Wave webhook signature verification error:', error);
+      return false;
     }
-    
-    // In production, verify the signature using the webhook secret
-    // This would typically involve HMAC verification
-    return true;
   }
 
   /**
-   * Parse webhook payload
+   * Parse webhook payload with enhanced error handling
    */
   parseWebhookPayload(body: any): {
     transaction_id: string;
@@ -186,31 +219,36 @@ export class WaveProvider {
     wave_id?: string;
     message?: string;
   } {
-    // Wave webhook format
-    if (body.id && body.status) {
-      return {
-        transaction_id: body.metadata?.mobys_transaction_id || body.id,
-        status: body.status,
-        amount: body.amount,
-        currency: body.currency,
-        wave_id: body.id,
-        message: body.description,
-      };
-    }
+    try {
+      // Wave webhook format
+      if (body.id && body.status) {
+        return {
+          transaction_id: body.metadata?.mobys_transaction_id || body.id,
+          status: body.status,
+          amount: body.amount,
+          currency: body.currency,
+          wave_id: body.id,
+          message: body.description,
+        };
+      }
 
-    // Alternative format with transaction_id
-    if (body.transaction_id && body.status) {
-      return {
-        transaction_id: body.transaction_id,
-        status: body.status,
-        amount: body.amount,
-        currency: body.currency,
-        wave_id: body.wave_id,
-        message: body.message,
-      };
-    }
+      // Handle different webhook formats
+      if (body.wave_id && body.status) {
+        return {
+          transaction_id: body.mobys_transaction_id || body.wave_id,
+          status: body.status,
+          amount: body.amount,
+          currency: body.currency,
+          wave_id: body.wave_id,
+          message: body.message || body.description,
+        };
+      }
 
-    throw new Error('Invalid Wave webhook payload');
+      throw new Error('Invalid Wave webhook payload format');
+    } catch (error: any) {
+      console.error('Wave webhook parsing error:', error);
+      throw new Error(`Failed to parse Wave webhook: ${error.message}`);
+    }
   }
 
   /**

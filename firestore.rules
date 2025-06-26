@@ -1,8 +1,112 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isApiKeyValid() {
+      return request.auth != null && request.auth.token.api_key != null;
+    }
+    
+    function isMerchant(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'admin';
+    }
+    
+    function isValidAmount(amount) {
+      return amount is number && amount > 0 && amount <= 1000000; // Max 1M XOF
+    }
+    
+    function isValidCurrency(currency) {
+      return currency == 'XOF';
+    }
+    
+    function isValidPhone(phone) {
+      return phone is string && phone.matches('^\\+[0-9]{10,15}$');
+    }
+    
+    // API Keys collection - only admins can manage
+    match /api_keys/{keyId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+    
+    // Users (merchants) collection
+    match /users/{userId} {
+      allow read: if isMerchant(userId) || isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isMerchant(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Transactions collection
+    match /transactions/{transactionId} {
+      allow read: if isApiKeyValid() && 
+        (resource.data.user_id == request.auth.token.user_id || isAdmin());
+      allow create: if isApiKeyValid() && 
+        isValidAmount(request.resource.data.amount) &&
+        isValidCurrency(request.resource.data.currency) &&
+        isValidPhone(request.resource.data.phone) &&
+        request.resource.data.user_id == request.auth.token.user_id;
+      allow update: if isApiKeyValid() && 
+        (resource.data.user_id == request.auth.token.user_id || isAdmin()) &&
+        // Only allow status updates, not amount/currency changes
+        request.resource.data.amount == resource.data.amount &&
+        request.resource.data.currency == resource.data.currency &&
+        request.resource.data.phone == resource.data.phone;
+      allow delete: if false; // Never allow deletion of transactions
+    }
+    
+    // Ledger collection - immutable financial records
+    match /ledger/{entryId} {
+      allow read: if isApiKeyValid() && 
+        (resource.data.user_id == request.auth.token.user_id || isAdmin());
+      allow create: if isApiKeyValid() && 
+        isValidAmount(request.resource.data.amount) &&
+        isValidCurrency(request.resource.data.currency) &&
+        request.resource.data.user_id == request.auth.token.user_id &&
+        // Ensure ledger entries are immutable
+        request.resource.data.created_at == request.time;
+      allow update: if false; // Never allow updates to ledger entries
+      allow delete: if false; // Never allow deletion of ledger entries
+    }
+    
+    // Webhooks collection - for logging webhook events
+    match /webhooks/{webhookId} {
+      allow read: if isAdmin();
+      allow create: if isApiKeyValid() || isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Payouts collection
+    match /payouts/{payoutId} {
+      allow read: if isApiKeyValid() && 
+        (resource.data.user_id == request.auth.token.user_id || isAdmin());
+      allow create: if isApiKeyValid() && 
+        isValidAmount(request.resource.data.amount) &&
+        isValidCurrency(request.resource.data.currency) &&
+        isValidPhone(request.resource.data.phone) &&
+        request.resource.data.user_id == request.auth.token.user_id;
+      allow update: if isApiKeyValid() && 
+        (resource.data.user_id == request.auth.token.user_id || isAdmin());
+      allow delete: if false; // Never allow deletion of payouts
+    }
+    
+    // Balances collection (cached balances)
+    match /balances/{userId} {
+      allow read: if isMerchant(userId) || isAdmin();
+      allow write: if isAdmin(); // Only system can update balances
+    }
+    
+    // Deny all other access
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 } 

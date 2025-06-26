@@ -2,6 +2,7 @@
 // Orange Money API Integration
 
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import * as crypto from 'crypto';
 import { ORANGE_MONEY_CONFIG, API_CONFIG } from '../config';
 
 interface OrangeMoneyToken {
@@ -204,22 +205,54 @@ export class OrangeMoneyProvider {
   }
 
   /**
-   * Verify webhook signature
+   * Verify webhook signature using HMAC
    */
   verifyWebhookSignature(payload: string, signature: string): boolean {
-    // TODO: Implement webhook signature verification
-    // For now, return true in sandbox mode
-    if (ORANGE_MONEY_CONFIG.environment === 'sandbox') {
-      return true;
+    try {
+      // In sandbox mode, accept all webhooks for testing
+      if (ORANGE_MONEY_CONFIG.environment === 'sandbox') {
+        console.log('Orange Money: Sandbox mode - accepting webhook without signature verification');
+        return true;
+      }
+
+      // In production, verify the signature
+      if (!ORANGE_MONEY_CONFIG.webhookSecret) {
+        console.error('Orange Money: Webhook secret not configured');
+        return false;
+      }
+
+      if (!signature) {
+        console.error('Orange Money: No signature provided in webhook');
+        return false;
+      }
+
+      // Create HMAC signature
+      const expectedSignature = crypto
+        .createHmac('sha256', ORANGE_MONEY_CONFIG.webhookSecret)
+        .update(payload)
+        .digest('hex');
+
+      // Compare signatures (constant-time comparison to prevent timing attacks)
+      const isValid = crypto.timingSafeEqual(
+        Buffer.from(signature, 'hex'),
+        Buffer.from(expectedSignature, 'hex')
+      );
+
+      console.log('Orange Money webhook signature verification:', {
+        provided: signature,
+        expected: expectedSignature,
+        isValid
+      });
+
+      return isValid;
+    } catch (error) {
+      console.error('Orange Money webhook signature verification error:', error);
+      return false;
     }
-    
-    // In production, verify the signature using the webhook secret
-    // This would typically involve HMAC verification
-    return true;
   }
 
   /**
-   * Parse webhook payload
+   * Parse webhook payload with enhanced error handling
    */
   parseWebhookPayload(body: any, query: any): {
     transaction_id: string;
@@ -228,29 +261,32 @@ export class OrangeMoneyProvider {
     currency?: string;
     message?: string;
   } {
-    // Orange Money can send webhooks in different formats
-    // 1. Query parameters (GET request)
-    // 2. JSON body (POST request)
-    
-    if (query.order_id && query.status) {
-      return {
-        transaction_id: query.order_id,
-        status: query.status,
-        message: query.message,
-      };
-    }
+    try {
+      // Handle GET request (redirect from Orange Money)
+      if (query && query.order_id) {
+        return {
+          transaction_id: query.order_id,
+          status: query.status || 'unknown',
+          message: query.message || query.description,
+        };
+      }
 
-    if (body.order_id && body.status) {
-      return {
-        transaction_id: body.order_id,
-        status: body.status,
-        amount: body.amount,
-        currency: body.currency,
-        message: body.message,
-      };
-    }
+      // Handle POST request (webhook notification)
+      if (body && body.order_id) {
+        return {
+          transaction_id: body.order_id,
+          status: body.status || 'unknown',
+          amount: body.amount,
+          currency: body.currency,
+          message: body.message || body.description,
+        };
+      }
 
-    throw new Error('Invalid Orange Money webhook payload');
+      throw new Error('Invalid Orange Money webhook payload format');
+    } catch (error: any) {
+      console.error('Orange Money webhook parsing error:', error);
+      throw new Error(`Failed to parse Orange Money webhook: ${error.message}`);
+    }
   }
 }
 
