@@ -108,6 +108,11 @@ This roadmap outlines the development phases to complete the Mobys API, from cor
 - **Transaction Status**: Complete state machine with audit logging
 - **API Endpoints**: Balance, ledger, and reconciliation endpoints
 - **Integration**: Seamless integration with payment flow and webhooks
+- **Analytics System**: Comprehensive transaction and ledger analytics with date range support
+- **User Analytics**: Top users by volume/activity with detailed metrics
+- **Dashboard Summary**: Real-time analytics summary for quick insights
+- **Admin Tools**: Manual ledger adjustments, transaction search, and export functionality
+- **System Monitoring**: Health checks, bulk operations, and user management tools
 
 ---
 

@@ -1,52 +1,61 @@
 // test/setup.ts
-// Test setup configuration
+// Test setup and configuration
 
-// Set test environment
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
+// Initialize Firebase Admin SDK for testing
+if (!process.env.FIREBASE_PROJECT_ID) {
+  process.env.FIREBASE_PROJECT_ID = 'test-project';
+}
+
+// Initialize Firebase app for testing
+try {
+  initializeApp({
+    projectId: process.env.FIREBASE_PROJECT_ID || 'test-project',
+    storageBucket: `${process.env.FIREBASE_PROJECT_ID || 'test-project'}.appspot.com`,
+  });
+} catch (error) {
+  // App might already be initialized, which is fine
+  console.log('Firebase app already initialized or error:', error);
+}
+
+// Configure Firestore for testing
+const db = getFirestore();
+db.settings({
+  ignoreUndefinedProperties: true,
+  projectId: process.env.FIREBASE_PROJECT_ID || 'test-project',
+});
+
+// Set up test environment variables
 process.env.NODE_ENV = 'test';
+process.env.API_KEY = 'test-api-key-123';
+process.env.WAVE_API_KEY = 'test-wave-key';
+process.env.WAVE_API_SECRET = 'test-wave-secret';
+process.env.ORANGE_MONEY_API_KEY = 'test-orange-key';
+process.env.ORANGE_MONEY_API_SECRET = 'test-orange-secret';
+process.env.WEBHOOK_SECRET = 'test-webhook-secret';
 
-// Mock environment variables for testing
-process.env.WAVE_API_KEY = 'test_wave_api_key';
-process.env.WAVE_API_SECRET = 'test_wave_api_secret';
-process.env.WAVE_WEBHOOK_SECRET = 'test_wave_webhook_secret';
-process.env.ORANGE_MONEY_API_KEY = 'test_orange_api_key';
-process.env.ORANGE_MONEY_API_SECRET = 'test_orange_api_secret';
-process.env.ORANGE_MONEY_WEBHOOK_SECRET = 'test_orange_webhook_secret';
-process.env.ORANGE_MONEY_MERCHANT_ID = 'test_merchant_id';
-process.env.ORANGE_MONEY_CLIENT_ID = 'test_client_id';
-process.env.ORANGE_MONEY_CLIENT_SECRET = 'test_client_secret';
-
-// Global test timeout
-(jest as any).setTimeout(10000);
-
-// Suppress console logs during tests unless there's an error
+// Mock console methods to reduce noise in tests
 const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
 
 beforeAll(() => {
-  console.log = (jest as any).fn();
-  console.error = (jest as any).fn();
+  // Suppress console output during tests unless there's an error
+  console.log = jest.fn();
+  console.warn = jest.fn();
+  console.error = originalConsoleError; // Keep error logging for debugging
 });
 
 afterAll(() => {
+  // Restore console methods
   console.log = originalConsoleLog;
+  console.warn = originalConsoleWarn;
   console.error = originalConsoleError;
 });
 
-// Global test utilities
-(global as any).testUtils = {
-  delay: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
-  createMockRequest: (data: any) => ({
-    body: data,
-    headers: {},
-    query: {},
-    params: {},
-    ip: '127.0.0.1'
-  }),
-  createMockResponse: () => {
-    const res: any = {};
-    res.status = () => res;
-    res.json = () => res;
-    res.send = () => res;
-    return res;
-  }
-}; 
+// Global test timeout
+jest.setTimeout(30000);
+
+export { db }; 

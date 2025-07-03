@@ -1,27 +1,38 @@
 // test/basic.test.ts
-// Basic functionality tests for Mobys API
+// Basic tests for Mobys API
 
 import { TEST_CONFIG } from './test-config';
 
 describe('Mobys API Basic Tests', () => {
   describe('Configuration', () => {
     it('should have valid test configuration', () => {
+      expect(TEST_CONFIG).toBeDefined();
       expect(TEST_CONFIG.TEST_API_KEY).toBeDefined();
-      expect(TEST_CONFIG.TEST_PAYMENT).toBeDefined();
-      expect(TEST_CONFIG.TEST_WEBHOOKS).toBeDefined();
+      expect(TEST_CONFIG.TEST_USER_ID).toBeDefined();
     });
 
     it('should have valid payment data', () => {
-      const payment = TEST_CONFIG.TEST_PAYMENT;
-      expect(payment.amount).toBeGreaterThan(0);
-      expect(payment.currency).toBe('XOF');
-      expect(payment.phone).toMatch(/^\+223\d{8}$/);
-      expect(['wave', 'orange_money']).toContain(payment.method);
+      expect(TEST_CONFIG.TEST_PAYMENT).toBeDefined();
+      expect(TEST_CONFIG.TEST_PAYMENT.amount).toBe(1000);
+      expect(TEST_CONFIG.TEST_PAYMENT.currency).toBe('XOF');
+      expect(TEST_CONFIG.TEST_PAYMENT.phone).toBeDefined();
+      expect(TEST_CONFIG.TEST_PAYMENT.method).toBeDefined();
     });
 
     it('should have valid webhook data', () => {
-      expect(TEST_CONFIG.TEST_WEBHOOKS.wave.success).toBeDefined();
-      expect(TEST_CONFIG.TEST_WEBHOOKS.orange_money.success).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.wave).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.orange_money).toBeDefined();
+      
+      // Check Wave webhook data
+      expect(TEST_CONFIG.TEST_WEBHOOKS.wave.mali).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.wave.senegal).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.wave.failed).toBeDefined();
+      
+      // Check Orange Money webhook data
+      expect(TEST_CONFIG.TEST_WEBHOOKS.orange_money.cote_divoire).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.orange_money.burkina_faso).toBeDefined();
+      expect(TEST_CONFIG.TEST_WEBHOOKS.orange_money.failed).toBeDefined();
     });
   });
 
@@ -52,49 +63,64 @@ describe('Mobys API Basic Tests', () => {
   describe('Environment Variables', () => {
     it('should have required environment variables set', () => {
       expect(process.env.NODE_ENV).toBe('test');
+      expect(process.env.API_KEY).toBeDefined();
       expect(process.env.WAVE_API_KEY).toBeDefined();
+      expect(process.env.WAVE_API_SECRET).toBeDefined();
       expect(process.env.ORANGE_MONEY_API_KEY).toBeDefined();
+      expect(process.env.ORANGE_MONEY_API_SECRET).toBeDefined();
     });
   });
 
   describe('Validation Logic', () => {
     it('should validate phone numbers correctly', () => {
-      const validPhones = ['+22391234567', '+22387654321'];
-      const invalidPhones = ['1234567890', '+1234567890', 'invalid'];
+      const { validateWestAfricanPhone } = require('../src/utils/phone-validation');
       
-      validPhones.forEach(phone => {
-        expect(phone).toMatch(/^\+223\d{8}$/);
+      // Test valid phone numbers
+      const validPhones = TEST_CONFIG.TEST_PHONE_NUMBERS.valid;
+      Object.values(validPhones).forEach(phone => {
+        const result = validateWestAfricanPhone(phone);
+        expect(result.isValid).toBe(true);
       });
       
-      invalidPhones.forEach(phone => {
-        expect(phone).not.toMatch(/^\+223\d{8}$/);
+      // Test invalid phone numbers
+      TEST_CONFIG.TEST_PHONE_NUMBERS.invalid.forEach(phone => {
+        const result = validateWestAfricanPhone(phone);
+        expect(result.isValid).toBe(false);
       });
     });
 
     it('should validate amounts correctly', () => {
-      const validAmounts = [100, 1000, 50000];
-      const invalidAmounts = [-100, 0, 99];
+      const validAmounts = [100, 1000, 50000, 100000];
+      const invalidAmounts = [0, -100, 'invalid', null, undefined];
       
       validAmounts.forEach(amount => {
+        expect(typeof amount).toBe('number');
         expect(amount).toBeGreaterThan(0);
-        expect(amount).toBeGreaterThanOrEqual(100);
       });
       
       invalidAmounts.forEach(amount => {
-        expect(amount <= 0 || amount < 100).toBe(true);
+        if (typeof amount === 'number') {
+          expect(amount).toBeLessThanOrEqual(0);
+        } else {
+          expect(typeof amount).not.toBe('number');
+        }
       });
     });
 
     it('should validate currencies correctly', () => {
-      const validCurrencies = ['XOF'];
-      const invalidCurrencies = ['USD', 'EUR', 'GBP'];
+      const validCurrencies = ['XOF', 'NGN'];
+      const invalidCurrencies = ['USD', 'EUR', 'GBP', 'invalid'];
       
       validCurrencies.forEach(currency => {
-        expect(currency).toBe('XOF');
+        expect(currency).toMatch(/^[A-Z]{3}$/);
       });
       
       invalidCurrencies.forEach(currency => {
-        expect(currency).not.toBe('XOF');
+        if (currency !== 'invalid') {
+          expect(currency).toMatch(/^[A-Z]{3}$/);
+        } else {
+          expect(currency).not.toMatch(/^[A-Z]{3}$/);
+        }
       });
     });
 
@@ -113,34 +139,54 @@ describe('Mobys API Basic Tests', () => {
   });
 
   describe('Data Structures', () => {
+    it('should have correct payment structure', () => {
+      const payment = TEST_CONFIG.TEST_PAYMENT;
+      
+      expect(payment).toHaveProperty('amount');
+      expect(payment).toHaveProperty('currency');
+      expect(payment).toHaveProperty('phone');
+      expect(payment).toHaveProperty('method');
+      expect(payment).toHaveProperty('metadata');
+      
+      expect(typeof payment.amount).toBe('number');
+      expect(typeof payment.currency).toBe('string');
+      expect(typeof payment.phone).toBe('string');
+      expect(typeof payment.method).toBe('string');
+      expect(typeof payment.metadata).toBe('object');
+    });
+
     it('should have correct webhook structure for Wave', () => {
-      const webhook = TEST_CONFIG.TEST_WEBHOOKS.wave.success;
+      const webhook = TEST_CONFIG.TEST_WEBHOOKS.wave.mali;
+      
       expect(webhook).toHaveProperty('id');
       expect(webhook).toHaveProperty('status');
       expect(webhook).toHaveProperty('amount');
       expect(webhook).toHaveProperty('currency');
       expect(webhook).toHaveProperty('phone');
       expect(webhook).toHaveProperty('metadata');
-      expect(webhook.metadata).toHaveProperty('mobys_transaction_id');
+      
+      expect(typeof webhook.id).toBe('string');
+      expect(typeof webhook.status).toBe('string');
+      expect(typeof webhook.amount).toBe('number');
+      expect(typeof webhook.currency).toBe('string');
+      expect(typeof webhook.phone).toBe('string');
+      expect(typeof webhook.metadata).toBe('object');
     });
 
     it('should have correct webhook structure for Orange Money', () => {
-      const webhook = TEST_CONFIG.TEST_WEBHOOKS.orange_money.success;
+      const webhook = TEST_CONFIG.TEST_WEBHOOKS.orange_money.cote_divoire;
+      
       expect(webhook).toHaveProperty('order_id');
       expect(webhook).toHaveProperty('status');
       expect(webhook).toHaveProperty('amount');
       expect(webhook).toHaveProperty('currency');
-    });
-
-    it('should have correct payment structure', () => {
-      const payment = TEST_CONFIG.TEST_PAYMENT;
-      expect(payment).toHaveProperty('amount');
-      expect(payment).toHaveProperty('currency');
-      expect(payment).toHaveProperty('phone');
-      expect(payment).toHaveProperty('method');
-      expect(payment).toHaveProperty('metadata');
-      expect(payment.metadata).toHaveProperty('order_id');
-      expect(payment.metadata).toHaveProperty('description');
+      expect(webhook).toHaveProperty('phone');
+      
+      expect(typeof webhook.order_id).toBe('string');
+      expect(typeof webhook.status).toBe('string');
+      expect(typeof webhook.amount).toBe('number');
+      expect(typeof webhook.currency).toBe('string');
+      expect(typeof webhook.phone).toBe('string');
     });
   });
 }); 

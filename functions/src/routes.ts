@@ -53,8 +53,13 @@ if (process.env.FUNCTIONS_EMULATOR) {
   process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
 }
 
-// Enable ignoreUndefinedProperties for Firestore
-db.settings({ ignoreUndefinedProperties: true });
+// Enable ignoreUndefinedProperties for Firestore (only if settings method exists)
+try {
+  db.settings({ ignoreUndefinedProperties: true });
+} catch (error) {
+  // Settings might not be available in test environment, which is fine
+  console.log('Firestore settings not available:', error);
+}
 
 const app = express();
 
